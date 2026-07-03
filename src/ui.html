@@ -9,6 +9,7 @@
         padding: 16px;
         font-size: 12px;
         color: #1a1a1a;
+        overflow-y: auto;
       }
       h2 {
         font-size: 14px;
@@ -17,6 +18,25 @@
       p {
         color: #555;
         line-height: 1.4;
+      }
+      label {
+        display: block;
+        font-weight: 600;
+        margin: 10px 0 4px;
+      }
+      input,
+      textarea {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 6px 8px;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        font-size: 12px;
+        font-family: inherit;
+      }
+      textarea {
+        resize: vertical;
+        min-height: 48px;
       }
       button {
         background: #18a0fb;
@@ -27,18 +47,29 @@
         cursor: pointer;
         width: 100%;
         font-size: 12px;
+        margin-top: 10px;
       }
       button:disabled {
         opacity: 0.5;
         cursor: not-allowed;
       }
-      #status {
+      .status {
         margin-top: 12px;
         color: #555;
         min-height: 16px;
       }
-      #status.error {
+      .status.error {
         color: #d32f2f;
+      }
+      .hint {
+        color: #888;
+        font-size: 11px;
+        margin-top: 4px;
+      }
+      hr {
+        border: none;
+        border-top: 1px solid #eee;
+        margin: 20px 0;
       }
     </style>
   </head>
@@ -49,17 +80,80 @@
       metadados) para um arquivo JSON local.
     </p>
     <button id="start">Iniciar Backup</button>
-    <div id="status"></div>
+    <div id="status" class="status"></div>
+
+    <hr />
+
+    <h2>Backup de Times / Projetos (via API)</h2>
+    <p>
+      Baixa o JSON completo de todos os arquivos dos times informados abaixo.
+      Requer um Personal Access Token (Figma &rarr; Settings &rarr; Security
+      &rarr; Personal access tokens). Drafts pessoais nao sao suportados: a
+      API do Figma nao os expoe.
+    </p>
+
+    <label for="token">Personal Access Token</label>
+    <input id="token" type="password" placeholder="figd_..." autocomplete="off" />
+
+    <label for="teamIds">Team IDs (um por linha ou separados por virgula)</label>
+    <textarea id="teamIds" placeholder="123456789012345678"></textarea>
+    <div class="hint">
+      O ID do time fica na URL ao abrir o time no Figma:
+      figma.com/files/team/&lt;team_id&gt;/...
+    </div>
+
+    <button id="teamStart">Iniciar Backup de Times</button>
+    <div id="teamStatus" class="status"></div>
+    <div class="hint">
+      O token fica salvo apenas neste arquivo/maquina (armazenamento local do
+      plugin). Nao compartilhe este token com ninguem.
+    </div>
 
     <script>
       const startBtn = document.getElementById("start");
       const status = document.getElementById("status");
 
+      const tokenInput = document.getElementById("token");
+      const teamIdsInput = document.getElementById("teamIds");
+      const teamStartBtn = document.getElementById("teamStart");
+      const teamStatus = document.getElementById("teamStatus");
+
+      window.onload = () => {
+        parent.postMessage({ pluginMessage: { type: "load-team-settings" } }, "*");
+      };
+
       startBtn.onclick = () => {
         startBtn.disabled = true;
-        status.className = "";
+        status.className = "status";
         status.textContent = "Gerando backup...";
         parent.postMessage({ pluginMessage: { type: "start-backup" } }, "*");
+      };
+
+      teamStartBtn.onclick = () => {
+        const token = tokenInput.value.trim();
+        const teamIds = teamIdsInput.value
+          .split(/[\n,]/)
+          .map((id) => id.trim())
+          .filter(Boolean);
+
+        if (!token || teamIds.length === 0) {
+          teamStatus.className = "status error";
+          teamStatus.textContent = "Informe o token e ao menos um team ID.";
+          return;
+        }
+
+        teamStartBtn.disabled = true;
+        teamStatus.className = "status";
+        teamStatus.textContent = "Iniciando backup...";
+
+        parent.postMessage(
+          { pluginMessage: { type: "save-team-settings", token, teamIds } },
+          "*"
+        );
+        parent.postMessage(
+          { pluginMessage: { type: "start-team-backup", token, teamIds } },
+          "*"
+        );
       };
 
       onmessage = (event) => {
@@ -87,9 +181,47 @@
         }
 
         if (msg.type === "backup-error") {
-          status.className = "error";
+          status.className = "status error";
           status.textContent = `Erro: ${msg.message}`;
           startBtn.disabled = false;
+        }
+
+        if (msg.type === "team-settings-loaded" && msg.settings) {
+          tokenInput.value = msg.settings.token || "";
+          teamIdsInput.value = (msg.settings.teamIds || []).join("\n");
+        }
+
+        if (msg.type === "team-backup-progress") {
+          teamStatus.textContent = msg.message;
+        }
+
+        if (msg.type === "team-backup-ready") {
+          const blob = new Blob([JSON.stringify(msg.payload, null, 2)], {
+            type: "application/json",
+          });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = `figma-team-backup-${Date.now()}.json`;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          URL.revokeObjectURL(url);
+
+          const errorCount = (msg.errors || []).length;
+          if (errorCount > 0) {
+            console.error(msg.errors);
+          }
+          teamStatus.textContent = errorCount
+            ? `Backup concluido com ${errorCount} erro(s) (veja o console).`
+            : "Backup concluido! Verifique seus downloads.";
+          teamStartBtn.disabled = false;
+        }
+
+        if (msg.type === "team-backup-error") {
+          teamStatus.className = "status error";
+          teamStatus.textContent = `Erro: ${msg.message}`;
+          teamStartBtn.disabled = false;
         }
       };
     </script>

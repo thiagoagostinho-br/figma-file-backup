@@ -1,8 +1,26 @@
 # File Backup (Figma Plugin)
 
-Plugin para Figma que exporta a estrutura completa do arquivo atual
-(paginas, camadas e metadados) para um arquivo `.json` local, servindo como
-backup rapido do documento.
+Plugin para Figma com duas funcionalidades de backup:
+
+1. **Arquivo atual**: exporta a estrutura do documento aberto (paginas,
+   camadas e metadados) para um `.json` local. Nao requer configuracao.
+2. **Times/Projetos via API**: usando um Personal Access Token, baixa o
+   JSON completo (`document`) de todos os arquivos dos times informados,
+   percorrendo `teams → projects → files` pela REST API do Figma.
+
+### Limitacoes conhecidas (da propria plataforma Figma, nao deste plugin)
+
+- **Sem `.fig` nativo**: a REST API do Figma nao expõe nenhum endpoint para
+  baixar o arquivo binario `.fig`. O backup de times/projetos gera JSON
+  (estrutura completa de nos, estilos, texto), util para inspecao,
+  versionamento e reconstrucao programatica — mas nao é um `.fig`
+  re-abrivel com duplo clique. A unica forma de obter o `.fig` real é
+  manualmente, via **File → Save local copy** dentro do proprio Figma.
+- **Sem drafts pessoais**: arquivos fora de times/projetos (drafts) nao sao
+  acessiveis por nenhum endpoint publico da API. Nao ha workaround.
+- **Sem listagem automatica de times**: a API nao tem endpoint para listar
+  os times do usuario — o `team_id` precisa ser copiado manualmente da URL
+  do time no Figma (`figma.com/files/team/<team_id>/...`).
 
 ## Requisitos
 
@@ -35,6 +53,24 @@ Figma Desktop e importe o plugin:
 Na primeira importacao o Figma pode adicionar automaticamente um campo `id`
 ao `manifest.json` — nao remova esse campo depois disso, ele identifica o
 plugin no seu ambiente de desenvolvimento.
+
+### Usando o backup de Times/Projetos
+
+1. Gere um Personal Access Token em **Figma → Settings → Security →
+   Personal access tokens** (escopo de leitura de arquivos ja é suficiente).
+2. Copie o(s) `team_id` pela URL do time no Figma.
+3. Na UI do plugin, cole o token e os team IDs (um por linha ou separados
+   por virgula) e clique em **Iniciar Backup de Times**.
+4. O token e os IDs ficam salvos localmente via `figma.clientStorage`
+   (por maquina/instalacao, nao sincroniza entre dispositivos) para nao
+   precisar redigitar a cada uso.
+5. O resultado é um unico `.json` contendo todos os times, projetos e
+   arquivos baixados, mais quaisquer erros por time (ex.: token sem acesso
+   a um time especifico) reportados sem interromper o restante do backup.
+
+**Seguranca**: o token dá acesso de leitura à sua conta Figma inteira
+(conforme o escopo escolhido). Nunca compartilhe esse token nem o commite
+em nenhum repositorio.
 
 ## Scripts
 
@@ -93,9 +129,9 @@ plugin no seu ambiente de desenvolvimento.
   fonte (`src/`), evitando divergencia entre codigo e artefato.
 - **Versionamento semantico**: incremente `version` em `package.json` e
   crie uma tag (`git tag vX.Y.Z && git push --tags`) a cada release.
-- **networkAccess restrito** no `manifest.json` (`"allowedDomains": ["none"]`):
-  o plugin nao acessa a rede, reduzindo superficie de risco na revisao da
-  Figma Community.
+- **networkAccess restrito** no `manifest.json`
+  (`"allowedDomains": ["https://api.figma.com"]`): o plugin so pode fazer
+  requisicoes para o dominio oficial da API do Figma, nada mais.
 
 ## Publicar na Figma Community
 
