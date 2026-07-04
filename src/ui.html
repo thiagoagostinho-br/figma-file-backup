@@ -109,6 +109,25 @@
       plugin). Nao compartilhe este token com ninguem.
     </div>
 
+    <hr />
+
+    <h2>Backup Completo (.fig)</h2>
+    <p>
+      Baixa o arquivo <code>.fig</code> nativo de cada arquivo dos times
+      acima (mesmos Team IDs). Requer o
+      <strong>helper local</strong> rodando na sua maquina
+      (<code>cd helper &amp;&amp; npm start</code>) — ele abre uma janela de
+      navegador separada e automatiza o "Save local copy" arquivo por
+      arquivo. Drafts pessoais continuam fora do escopo.
+    </p>
+    <div id="envNotice" class="hint"></div>
+
+    <button id="fullBackupStart">Iniciar Backup Completo (.fig)</button>
+    <button id="fullBackupCancel" style="background:#888; display:none;">
+      Cancelar
+    </button>
+    <div id="fullBackupStatus" class="status"></div>
+
     <script>
       const startBtn = document.getElementById("start");
       const status = document.getElementById("status");
@@ -223,6 +242,99 @@
           teamStatus.textContent = `Erro: ${msg.message}`;
           teamStartBtn.disabled = false;
         }
+      };
+
+      // --- Backup Completo (.fig) via helper local ---
+      const HELPER_URL = "http://localhost:8722";
+      const envNotice = document.getElementById("envNotice");
+      const fullBackupStart = document.getElementById("fullBackupStart");
+      const fullBackupCancel = document.getElementById("fullBackupCancel");
+      const fullBackupStatus = document.getElementById("fullBackupStatus");
+
+      // Deteccao best-effort: o app Desktop do Figma customiza o user agent.
+      // Nao ha API oficial para isso, entao trate como um palpite, nao certeza.
+      const looksLikeDesktopApp = /Figma\//i.test(navigator.userAgent);
+      envNotice.textContent = looksLikeDesktopApp
+        ? "Detectado: app Desktop. O botao abaixo vai abrir uma janela de navegador para automatizar o backup."
+        : "Detectado: navegador. O botao abaixo aciona o helper local diretamente.";
+
+      let pollTimer = null;
+
+      function stopPolling() {
+        if (pollTimer) {
+          clearInterval(pollTimer);
+          pollTimer = null;
+        }
+      }
+
+      function renderFullBackupStatus(data) {
+        if (data.total > 0) {
+          fullBackupStatus.textContent = `${data.message} (${data.processed}/${data.total})`;
+        } else {
+          fullBackupStatus.textContent = data.message || data.status;
+        }
+
+        if (data.status === "done" || data.status === "cancelled" || data.status === "error") {
+          stopPolling();
+          fullBackupStart.disabled = false;
+          fullBackupCancel.style.display = "none";
+          fullBackupStatus.className = data.status === "error" ? "status error" : "status";
+          if (data.errors && data.errors.length) {
+            console.error(data.errors);
+            fullBackupStatus.textContent += ` — ${data.errors.length} erro(s) (veja o console)`;
+          }
+        }
+      }
+
+      function pollStatus() {
+        fetch(`${HELPER_URL}/status`)
+          .then((res) => res.json())
+          .then(renderFullBackupStatus)
+          .catch(() => {
+            stopPolling();
+            fullBackupStatus.className = "status error";
+            fullBackupStatus.textContent = "Perdeu conexao com o helper local.";
+            fullBackupStart.disabled = false;
+            fullBackupCancel.style.display = "none";
+          });
+      }
+
+      fullBackupStart.onclick = () => {
+        const teamIds = teamIdsInput.value
+          .split(/[\n,]/)
+          .map((id) => id.trim())
+          .filter(Boolean);
+
+        if (teamIds.length === 0) {
+          fullBackupStatus.className = "status error";
+          fullBackupStatus.textContent = "Informe ao menos um team ID (campo acima).";
+          return;
+        }
+
+        fullBackupStart.disabled = true;
+        fullBackupStatus.className = "status";
+        fullBackupStatus.textContent = "Conectando ao helper local...";
+
+        fetch(`${HELPER_URL}/start`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ teamIds }),
+        })
+          .then((res) => {
+            if (!res.ok) throw new Error("helper recusou a requisicao");
+            fullBackupCancel.style.display = "block";
+            pollTimer = setInterval(pollStatus, 1500);
+          })
+          .catch(() => {
+            fullBackupStart.disabled = false;
+            fullBackupStatus.className = "status error";
+            fullBackupStatus.textContent =
+              "Nao foi possivel conectar ao helper local. Rode 'npm start' na pasta helper/ e tente novamente.";
+          });
+      };
+
+      fullBackupCancel.onclick = () => {
+        fetch(`${HELPER_URL}/cancel`, { method: "POST" }).catch(() => {});
       };
     </script>
   </body>

@@ -1,26 +1,37 @@
 # File Backup (Figma Plugin)
 
-Plugin para Figma com duas funcionalidades de backup:
+Plugin para Figma com tres funcionalidades de backup:
 
 1. **Arquivo atual**: exporta a estrutura do documento aberto (paginas,
    camadas e metadados) para um `.json` local. Nao requer configuracao.
 2. **Times/Projetos via API**: usando um Personal Access Token, baixa o
    JSON completo (`document`) de todos os arquivos dos times informados,
    percorrendo `teams → projects → files` pela REST API do Figma.
+3. **Backup Completo (.fig)**: aciona um helper local (`helper/`, Node +
+   Playwright) que abre uma janela de navegador e automatiza o "Save local
+   copy" arquivo por arquivo, baixando o `.fig` nativo de verdade. Veja
+   [helper/README](#backup-completo-fig-via-helper-local) abaixo.
 
 ### Limitacoes conhecidas (da propria plataforma Figma, nao deste plugin)
 
-- **Sem `.fig` nativo**: a REST API do Figma nao expõe nenhum endpoint para
-  baixar o arquivo binario `.fig`. O backup de times/projetos gera JSON
-  (estrutura completa de nos, estilos, texto), util para inspecao,
-  versionamento e reconstrucao programatica — mas nao é um `.fig`
-  re-abrivel com duplo clique. A unica forma de obter o `.fig` real é
-  manualmente, via **File → Save local copy** dentro do proprio Figma.
+- **Sem endpoint de API para `.fig` nativo**: a REST API do Figma nao expõe
+  nenhum jeito de baixar o binario `.fig` diretamente. O backup de
+  Times/Projetos (opcao 2) gera JSON (estrutura completa de nos, estilos,
+  texto) — util para inspecao/versionamento, mas nao reabrivel com duplo
+  clique. Para o `.fig` real, a opcao 3 (helper local) automatiza a unica
+  via que existe: **File → Save local copy** dentro do proprio Figma.
 - **Sem drafts pessoais**: arquivos fora de times/projetos (drafts) nao sao
-  acessiveis por nenhum endpoint publico da API. Nao ha workaround.
+  acessiveis por nenhum endpoint publico nem pela navegacao do helper de
+  forma confiavel. Nao ha workaround.
 - **Sem listagem automatica de times**: a API nao tem endpoint para listar
   os times do usuario — o `team_id` precisa ser copiado manualmente da URL
   do time no Figma (`figma.com/files/team/<team_id>/...`).
+- **Automacao de UI é fragil por natureza**: o helper local (opcao 3)
+  navega e clica na interface real do Figma, cujas classes CSS mudam a
+  cada deploy deles. Os seletores usados (`helper/src/selectors.js`) usam
+  texto/atributos mais estaveis quando possivel, mas podem quebrar sem
+  aviso se o Figma mudar a UI — se isso acontecer, o ajuste comeca nesse
+  arquivo.
 
 ## Requisitos
 
@@ -72,6 +83,43 @@ plugin no seu ambiente de desenvolvimento.
 (conforme o escopo escolhido). Nunca compartilhe esse token nem o commite
 em nenhum repositorio.
 
+### Backup Completo (.fig) via helper local
+
+O plugin sozinho (rodando dentro do app Desktop ou do navegador) nunca tem
+acesso para clicar em "Save local copy" na interface do Figma — plugins
+rodam sempre num iframe isolado (sandbox), sem esse tipo de permissao,
+independente de onde rodam. Por isso essa automacao precisa de um processo
+separado no seu computador: o helper local em `helper/`.
+
+**Setup (uma vez):**
+
+```bash
+cd helper
+npm install
+npm run install-browsers   # baixa o Chromium usado pelo Playwright
+npm start                  # sobe o servidor em http://localhost:8722
+```
+
+Deixe esse terminal aberto enquanto for usar a opcao "Backup Completo
+(.fig)" no plugin.
+
+**Uso:**
+
+1. Preencha os Team IDs na secao "Times / Projetos" da UI (o campo é
+   compartilhado com a opcao 3).
+2. Clique em **Iniciar Backup Completo (.fig)**. O plugin detecta se esta
+   rodando no app Desktop ou no navegador (deteccao best-effort via user
+   agent — o Figma nao tem uma API oficial pra isso) e ajusta a mensagem,
+   mas em ambos os casos apenas aciona o helper local via `fetch` para
+   `http://localhost:8722/start`.
+3. Uma janela de navegador separada abre (controlada pelo Playwright). No
+   primeiro uso, faca login manualmente nela — a sessao fica salva em
+   `~/.figma-backup-helper/browser-profile` para as proximas vezes.
+4. O helper navega por cada time/projeto/arquivo, aciona "Save local copy"
+   e salva os `.fig` em `~/Figma Backups/<team_id>/<arquivo>.fig`.
+5. Progresso e erros aparecem na UI do plugin (poll em `/status` a cada
+   1.5s). Da pra cancelar a qualquer momento.
+
 ## Scripts
 
 | Comando            | Descricao                                  |
@@ -89,6 +137,12 @@ em nenhum repositorio.
 ├── src/
 │   ├── code.ts           # Logica principal (thread do plugin)
 │   └── ui.html            # Interface exibida ao usuario
+├── helper/                # Helper local (Node + Playwright) p/ backup .fig
+│   ├── package.json
+│   └── src/
+│       ├── server.js       # HTTP local (start/status/cancel)
+│       ├── automation.js   # Automacao Playwright (login, navegacao, save)
+│       └── selectors.js     # Seletores isolados (ponto de ajuste se quebrar)
 ├── dist/                  # Saida do build (gerado, nao versionado)
 └── .github/workflows/ci.yml  # Pipeline de lint/typecheck/build
 ```
@@ -130,8 +184,10 @@ em nenhum repositorio.
 - **Versionamento semantico**: incremente `version` em `package.json` e
   crie uma tag (`git tag vX.Y.Z && git push --tags`) a cada release.
 - **networkAccess restrito** no `manifest.json`
-  (`"allowedDomains": ["https://api.figma.com"]`): o plugin so pode fazer
-  requisicoes para o dominio oficial da API do Figma, nada mais.
+  (`"allowedDomains": ["https://api.figma.com", "http://localhost:8722"]`):
+  o plugin so pode falar com o dominio oficial da API do Figma e com o
+  helper local (que roda na maquina do proprio usuario, na porta fixa
+  `8722`) — nada mais.
 
 ## Publicar na Figma Community
 

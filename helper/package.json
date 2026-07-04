@@ -1,0 +1,14 @@
+{
+  "name": "figma-backup-helper",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Helper local que automatiza o download de arquivos .fig via Playwright, acionado pelo plugin File Backup.",
+  "scripts": {
+    "start": "node src/server.js",
+    "install-browsers": "playwright install chromium"
+  },
+  "dependencies": {
+    "playwright": "^1.45.0"
+  }
+}
