@@ -91,7 +91,18 @@ rodam sempre num iframe isolado (sandbox), sem esse tipo de permissao,
 independente de onde rodam. Por isso essa automacao precisa de um processo
 separado no seu computador: o helper local em `helper/`.
 
-**Setup (uma vez):**
+**Setup (uma vez), forma recomendada — dois cliques:**
+
+De dois cliques em `helper/start.command` no Finder. Ele detecta sozinho o
+que falta (dependencias, navegador do Playwright) e so instala na primeira
+vez; nas proximas, so sobe o servidor direto. Deixe essa janela do Terminal
+aberta enquanto for usar a opcao "Backup Completo (.fig)" no plugin.
+
+Isso funciona porque `start.command` roda fora do plugin, diretamente no
+seu Mac — o plugin em si nao tem permissao para abrir terminal nem instalar
+nada (mesmo sandbox que impede a automacao direta do "Save local copy").
+
+**Alternativa manual** (equivalente ao que o `start.command` faz):
 
 ```bash
 cd helper
@@ -99,9 +110,6 @@ npm install
 npm run install-browsers   # baixa o Chromium usado pelo Playwright
 npm start                  # sobe o servidor em http://localhost:8722
 ```
-
-Deixe esse terminal aberto enquanto for usar a opcao "Backup Completo
-(.fig)" no plugin.
 
 **Uso:**
 
