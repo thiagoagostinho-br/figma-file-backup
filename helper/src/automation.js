@@ -42,6 +42,42 @@ async function ensureLoggedIn(page) {
   }
 }
 
+async function discoverTeamFromFile(page, fileKey) {
+  await page.goto(`https://www.figma.com/file/${fileKey}`, { waitUntil: "networkidle" });
+
+  const projectHref = await page
+    .locator(SELECTORS.projectLink)
+    .first()
+    .getAttribute("href")
+    .catch(() => null);
+
+  if (!projectHref) {
+    throw new Error("Nao foi possivel identificar o projeto do arquivo atual (selector desatualizado?).");
+  }
+
+  const projectUrl = projectHref.startsWith("http")
+    ? projectHref
+    : `https://www.figma.com${projectHref}`;
+  await page.goto(projectUrl, { waitUntil: "networkidle" });
+
+  const teamHref = await page
+    .locator(SELECTORS.teamLink)
+    .first()
+    .getAttribute("href")
+    .catch(() => null);
+
+  if (!teamHref) {
+    throw new Error("Nao foi possivel identificar o time do arquivo atual (selector desatualizado?).");
+  }
+
+  const match = teamHref.match(/\/files\/team\/(\d+)/);
+  if (!match) {
+    throw new Error(`ID do time nao reconhecido na URL: ${teamHref}`);
+  }
+
+  return match[1];
+}
+
 async function discoverFiles(page, teamId) {
   await page.goto(`https://www.figma.com/files/team/${teamId}`, { waitUntil: "networkidle" });
 
@@ -78,7 +114,7 @@ async function saveLocalCopy(page, fileUrl, outputPath) {
   await download.saveAs(outputPath);
 }
 
-export async function runBackup({ teamIds, outputDir }) {
+export async function runBackup({ fileKey, outputDir }) {
   cancelRequested = false;
   const targetDir = outputDir || DEFAULT_OUTPUT_DIR;
   fs.mkdirSync(targetDir, { recursive: true });
@@ -94,30 +130,30 @@ export async function runBackup({ teamIds, outputDir }) {
   try {
     const page = context.pages()[0] || (await context.newPage());
     await ensureLoggedIn(page);
-    setState({ status: "running", message: "Descobrindo arquivos..." });
 
+    setState({ message: "Identificando o time do arquivo atual..." });
+    const teamId = await discoverTeamFromFile(page, fileKey);
+
+    setState({ message: "Descobrindo arquivos do time..." });
     const errors = [];
-    const allFiles = [];
+    let files = [];
 
-    for (const teamId of teamIds) {
-      if (cancelRequested) break;
-      try {
-        const files = await discoverFiles(page, teamId);
-        allFiles.push(...files.map((f) => ({ ...f, teamId })));
-      } catch (error) {
-        errors.push(`Time ${teamId}: ${error instanceof Error ? error.message : "erro ao listar arquivos"}`);
-      }
+    try {
+      files = await discoverFiles(page, teamId);
+    } catch (error) {
+      errors.push(`Time ${teamId}: ${error instanceof Error ? error.message : "erro ao listar arquivos"}`);
     }
 
-    setState({ total: allFiles.length });
+    setState({ total: files.length });
+
+    const teamDir = path.join(targetDir, teamId);
+    fs.mkdirSync(teamDir, { recursive: true });
 
     let processed = 0;
-    for (const file of allFiles) {
+    for (const file of files) {
       if (cancelRequested) break;
 
       const safeName = file.name.replace(/[^a-z0-9-_]+/gi, "_") || "arquivo";
-      const teamDir = path.join(targetDir, file.teamId);
-      fs.mkdirSync(teamDir, { recursive: true });
       const outputPath = path.join(teamDir, `${safeName}.fig`);
 
       setState({ message: `Baixando ${file.name}...` });

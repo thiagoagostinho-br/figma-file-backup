@@ -19,25 +19,6 @@
         color: #555;
         line-height: 1.4;
       }
-      label {
-        display: block;
-        font-weight: 600;
-        margin: 10px 0 4px;
-      }
-      input,
-      textarea {
-        width: 100%;
-        box-sizing: border-box;
-        padding: 6px 8px;
-        border: 1px solid #ccc;
-        border-radius: 4px;
-        font-size: 12px;
-        font-family: inherit;
-      }
-      textarea {
-        resize: vertical;
-        min-height: 48px;
-      }
       button {
         background: #18a0fb;
         color: #fff;
@@ -66,197 +47,76 @@
         font-size: 11px;
         margin-top: 4px;
       }
-      hr {
-        border: none;
-        border-top: 1px solid #eee;
-        margin: 20px 0;
+      .fileBox {
+        background: #f5f5f5;
+        border-radius: 6px;
+        padding: 8px 10px;
+        margin: 10px 0;
+        font-size: 12px;
+      }
+      .fileBox strong {
+        display: block;
+        font-size: 13px;
+        margin-bottom: 2px;
       }
     </style>
   </head>
   <body>
-    <h2>Backup de Arquivo</h2>
-    <p>
-      Exporta a estrutura completa do arquivo atual (paginas, camadas e
-      metadados) para um arquivo JSON local.
-    </p>
-    <button id="start">Iniciar Backup</button>
-    <div id="status" class="status"></div>
-
-    <hr />
-
-    <h2>Backup de Times / Projetos (via API)</h2>
-    <p>
-      Baixa o JSON completo de todos os arquivos dos times informados abaixo.
-      Requer um Personal Access Token (Figma &rarr; Settings &rarr; Security
-      &rarr; Personal access tokens). Drafts pessoais nao sao suportados: a
-      API do Figma nao os expoe.
-    </p>
-
-    <label for="token">Personal Access Token</label>
-    <input id="token" type="password" placeholder="figd_..." autocomplete="off" />
-
-    <label for="teamIds">Team IDs (um por linha ou separados por virgula)</label>
-    <textarea id="teamIds" placeholder="123456789012345678"></textarea>
-    <div class="hint">
-      O ID do time fica na URL ao abrir o time no Figma:
-      figma.com/files/team/&lt;team_id&gt;/...
-    </div>
-
-    <button id="teamStart">Iniciar Backup de Times</button>
-    <div id="teamStatus" class="status"></div>
-    <div class="hint">
-      O token fica salvo apenas neste arquivo/maquina (armazenamento local do
-      plugin). Nao compartilhe este token com ninguem.
-    </div>
-
-    <hr />
-
     <h2>Backup Completo (.fig)</h2>
     <p>
-      Baixa o arquivo <code>.fig</code> nativo de cada arquivo dos times
-      acima (mesmos Team IDs). Requer o
-      <strong>helper local</strong> rodando na sua maquina
-      (<code>cd helper &amp;&amp; npm start</code>) — ele abre uma janela de
-      navegador separada e automatiza o "Save local copy" arquivo por
-      arquivo. Drafts pessoais continuam fora do escopo.
+      Baixa o arquivo <code>.fig</code> nativo de todos os arquivos do time
+      do arquivo atual. Requer o <strong>helper local</strong> rodando na
+      sua maquina (dois cliques em <code>helper/start.command</code>) — ele
+      abre uma janela de navegador e automatiza o "Save local copy" arquivo
+      por arquivo. Drafts pessoais continuam fora do escopo.
     </p>
+
+    <div class="fileBox" id="fileBox">Identificando arquivo atual...</div>
     <div id="envNotice" class="hint"></div>
 
-    <button id="fullBackupStart">Iniciar Backup Completo (.fig)</button>
+    <button id="fullBackupStart" disabled>Iniciar Backup Completo (.fig)</button>
     <button id="fullBackupCancel" style="background:#888; display:none;">
       Cancelar
     </button>
     <div id="fullBackupStatus" class="status"></div>
 
     <script>
-      const startBtn = document.getElementById("start");
-      const status = document.getElementById("status");
-
-      const tokenInput = document.getElementById("token");
-      const teamIdsInput = document.getElementById("teamIds");
-      const teamStartBtn = document.getElementById("teamStart");
-      const teamStatus = document.getElementById("teamStatus");
-
-      window.onload = () => {
-        parent.postMessage({ pluginMessage: { type: "load-team-settings" } }, "*");
-      };
-
-      startBtn.onclick = () => {
-        startBtn.disabled = true;
-        status.className = "status";
-        status.textContent = "Gerando backup...";
-        parent.postMessage({ pluginMessage: { type: "start-backup" } }, "*");
-      };
-
-      teamStartBtn.onclick = () => {
-        const token = tokenInput.value.trim();
-        const teamIds = teamIdsInput.value
-          .split(/[\n,]/)
-          .map((id) => id.trim())
-          .filter(Boolean);
-
-        if (!token || teamIds.length === 0) {
-          teamStatus.className = "status error";
-          teamStatus.textContent = "Informe o token e ao menos um team ID.";
-          return;
-        }
-
-        teamStartBtn.disabled = true;
-        teamStatus.className = "status";
-        teamStatus.textContent = "Iniciando backup...";
-
-        parent.postMessage(
-          { pluginMessage: { type: "save-team-settings", token, teamIds } },
-          "*"
-        );
-        parent.postMessage(
-          { pluginMessage: { type: "start-team-backup", token, teamIds } },
-          "*"
-        );
-      };
-
-      onmessage = (event) => {
-        const msg = event.data.pluginMessage;
-        if (!msg) return;
-
-        if (msg.type === "backup-ready") {
-          const blob = new Blob([JSON.stringify(msg.payload, null, 2)], {
-            type: "application/json",
-          });
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement("a");
-          const safeName = (msg.payload.fileName || "figma-backup").replace(
-            /[^a-z0-9-_]+/gi,
-            "_"
-          );
-          a.href = url;
-          a.download = `${safeName}-${Date.now()}.json`;
-          document.body.appendChild(a);
-          a.click();
-          a.remove();
-          URL.revokeObjectURL(url);
-          status.textContent = "Backup concluido! Verifique seus downloads.";
-          startBtn.disabled = false;
-        }
-
-        if (msg.type === "backup-error") {
-          status.className = "status error";
-          status.textContent = `Erro: ${msg.message}`;
-          startBtn.disabled = false;
-        }
-
-        if (msg.type === "team-settings-loaded" && msg.settings) {
-          tokenInput.value = msg.settings.token || "";
-          teamIdsInput.value = (msg.settings.teamIds || []).join("\n");
-        }
-
-        if (msg.type === "team-backup-progress") {
-          teamStatus.textContent = msg.message;
-        }
-
-        if (msg.type === "team-backup-ready") {
-          const blob = new Blob([JSON.stringify(msg.payload, null, 2)], {
-            type: "application/json",
-          });
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement("a");
-          a.href = url;
-          a.download = `figma-team-backup-${Date.now()}.json`;
-          document.body.appendChild(a);
-          a.click();
-          a.remove();
-          URL.revokeObjectURL(url);
-
-          const errorCount = (msg.errors || []).length;
-          if (errorCount > 0) {
-            console.error(msg.errors);
-          }
-          teamStatus.textContent = errorCount
-            ? `Backup concluido com ${errorCount} erro(s) (veja o console).`
-            : "Backup concluido! Verifique seus downloads.";
-          teamStartBtn.disabled = false;
-        }
-
-        if (msg.type === "team-backup-error") {
-          teamStatus.className = "status error";
-          teamStatus.textContent = `Erro: ${msg.message}`;
-          teamStartBtn.disabled = false;
-        }
-      };
-
-      // --- Backup Completo (.fig) via helper local ---
       const HELPER_URL = "http://localhost:8722";
+
+      const fileBox = document.getElementById("fileBox");
       const envNotice = document.getElementById("envNotice");
       const fullBackupStart = document.getElementById("fullBackupStart");
       const fullBackupCancel = document.getElementById("fullBackupCancel");
       const fullBackupStatus = document.getElementById("fullBackupStatus");
 
+      let currentFileKey = null;
+
+      window.onload = () => {
+        parent.postMessage({ pluginMessage: { type: "get-file-context" } }, "*");
+      };
+
       // Deteccao best-effort: o app Desktop do Figma customiza o user agent.
       // Nao ha API oficial para isso, entao trate como um palpite, nao certeza.
       const looksLikeDesktopApp = /Figma\//i.test(navigator.userAgent);
       envNotice.textContent = looksLikeDesktopApp
-        ? "Detectado: app Desktop. O botao abaixo vai abrir uma janela de navegador para automatizar o backup."
-        : "Detectado: navegador. O botao abaixo aciona o helper local diretamente.";
+        ? "Detectado: app Desktop. Uma janela de navegador vai abrir para automatizar o backup."
+        : "Detectado: navegador. O botao aciona o helper local diretamente.";
+
+      onmessage = (event) => {
+        const msg = event.data.pluginMessage;
+        if (!msg) return;
+
+        if (msg.type === "file-context") {
+          currentFileKey = msg.fileKey;
+          if (currentFileKey) {
+            fileBox.innerHTML = `<strong>${msg.fileName}</strong>Backup vai usar o time deste arquivo.`;
+            fullBackupStart.disabled = false;
+          } else {
+            fileBox.textContent =
+              "Nao foi possivel identificar este arquivo. Salve-o no Figma antes de continuar.";
+          }
+        }
+      };
 
       let pollTimer = null;
 
@@ -300,16 +160,7 @@
       }
 
       fullBackupStart.onclick = () => {
-        const teamIds = teamIdsInput.value
-          .split(/[\n,]/)
-          .map((id) => id.trim())
-          .filter(Boolean);
-
-        if (teamIds.length === 0) {
-          fullBackupStatus.className = "status error";
-          fullBackupStatus.textContent = "Informe ao menos um team ID (campo acima).";
-          return;
-        }
+        if (!currentFileKey) return;
 
         fullBackupStart.disabled = true;
         fullBackupStatus.className = "status";
@@ -318,7 +169,7 @@
         fetch(`${HELPER_URL}/start`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ teamIds }),
+          body: JSON.stringify({ fileKey: currentFileKey }),
         })
           .then((res) => {
             if (!res.ok) throw new Error("helper recusou a requisicao");
@@ -329,7 +180,7 @@
             fullBackupStart.disabled = false;
             fullBackupStatus.className = "status error";
             fullBackupStatus.textContent =
-              "Nao foi possivel conectar ao helper local. Rode 'npm start' na pasta helper/ e tente novamente.";
+              "Nao foi possivel conectar ao helper local. Rode 'helper/start.command' e tente novamente.";
           });
       };
 

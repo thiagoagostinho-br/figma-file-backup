@@ -36,12 +36,12 @@ const server = http.createServer((req, res) => {
     });
     req.on("end", () => {
       try {
-        const { teamIds, outputDir } = JSON.parse(body || "{}");
-        if (!Array.isArray(teamIds) || teamIds.length === 0) {
-          sendJson(res, 400, { error: "teamIds e obrigatorio" });
+        const { fileKey, outputDir } = JSON.parse(body || "{}");
+        if (!fileKey) {
+          sendJson(res, 400, { error: "fileKey e obrigatorio" });
           return;
         }
-        runBackup({ teamIds, outputDir }).catch((error) => {
+        runBackup({ fileKey, outputDir }).catch((error) => {
           console.error("Backup falhou:", error);
         });
         sendJson(res, 202, { started: true });

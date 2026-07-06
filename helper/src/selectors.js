@@ -2,6 +2,8 @@
 // que mudam a cada deploy — se a automacao quebrar, o ajuste comeca por aqui.
 export const SELECTORS = {
   fileLink: 'a[href*="/file/"], a[href*="/design/"]',
+  projectLink: 'a[href*="/files/project/"]',
+  teamLink: 'a[href*="/files/team/"]',
   mainMenuButton: '[aria-label="Main Menu" i], [aria-label="Menu principal" i]',
 };
 
