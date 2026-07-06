@@ -91,22 +91,27 @@ npm run install-browsers   # baixa o Chromium usado pelo Playwright
 npm start                  # sobe o servidor em http://localhost:8722
 ```
 
-**Uso:**
+**Uso (fluxo em duas etapas):**
 
-1. Abra o arquivo que representa o time que voce quer fazer backup e rode
-   o plugin. A UI mostra o nome do arquivo identificado.
-2. Clique em **Iniciar Backup Completo (.fig)**. O plugin detecta se esta
-   rodando no app Desktop ou no navegador (deteccao best-effort via user
-   agent — o Figma nao tem uma API oficial pra isso) e ajusta a mensagem,
-   mas em ambos os casos apenas aciona o helper local via `fetch` para
-   `http://localhost:8722/start`, passando o `fileKey` do arquivo atual.
-3. Uma janela de navegador separada abre (controlada pelo Playwright). No
-   primeiro uso, faca login manualmente nela — a sessao fica salva em
-   `~/.figma-backup-helper/browser-profile` para as proximas vezes.
-4. O helper navega ate o arquivo atual, descobre o `team_id` pela interface
-   (arquivo → projeto → time), lista os arquivos desse time, aciona "Save
-   local copy" em cada um e salva os `.fig` em
-   `~/Figma Backups/<team_id>/<arquivo>.fig`.
+1. **Etapa 1 — conectar o helper.** Abra o arquivo que representa o time
+   que voce quer fazer backup e rode o plugin. Se o helper local ainda nao
+   estiver rodando, a UI mostra as instrucoes e um botao **Iniciar
+   Backup** que verifica a conexao com `http://localhost:8722`. O plugin
+   nao consegue abrir o `start.command` sozinho (sandbox sem permissao pra
+   isso), entao ele so re-verifica a cada poucos segundos — assim que voce
+   der os dois cliques no `start.command`, a UI avanca sozinha pra etapa 2.
+2. **Etapa 2 — escolher e baixar.** Assim que o helper responde, o plugin
+   automaticamente pede pra ele descobrir o `team_id` do arquivo atual
+   (navegando arquivo → projeto → time na interface real do Figma) e
+   listar os arquivos desse time. A lista aparece com uma checkbox por
+   arquivo (mais um "Selecionar todos"); o botao **Iniciar Backup** fica
+   desabilitado ate voce marcar pelo menos um.
+3. Ao clicar em Iniciar Backup, uma janela de navegador separada abre
+   (controlada pelo Playwright, a mesma sessao aberta na etapa 2). No
+   primeiro uso geral, faca login manualmente nela — a sessao fica salva
+   em `~/.figma-backup-helper/browser-profile` para as proximas vezes.
+4. O helper aciona "Save local copy" em cada arquivo selecionado e salva
+   os `.fig` em `~/Figma Backups/<team_id>/<arquivo>.fig`.
 5. Progresso e erros aparecem na UI do plugin (poll em `/status` a cada
    1.5s). Da pra cancelar a qualquer momento.
 

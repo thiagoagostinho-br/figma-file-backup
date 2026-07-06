@@ -1,4 +1,4 @@
-figma.showUI(__html__, { width: 340, height: 340 });
+figma.showUI(__html__, { width: 360, height: 480 });
 
 type UiMessage = { type: "get-file-context" } | { type: "close" };
 

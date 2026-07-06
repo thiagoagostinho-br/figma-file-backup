@@ -7,15 +7,20 @@ import { SELECTORS, TEXT_PATTERNS } from "./selectors.js";
 const PROFILE_DIR = path.join(os.homedir(), ".figma-backup-helper", "browser-profile");
 const DEFAULT_OUTPUT_DIR = path.join(os.homedir(), "Figma Backups");
 
+// phase: idle | discovering | ready | downloading | done | cancelled | error
 let state = {
-  status: "idle",
+  phase: "idle",
   message: "",
   processed: 0,
   total: 0,
+  files: [],
+  teamId: null,
   errors: [],
 };
 
 let cancelRequested = false;
+let activeContext = null;
+let activePage = null;
 
 export function getStatus() {
   return state;
@@ -29,13 +34,20 @@ function setState(partial) {
   state = { ...state, ...partial };
 }
 
+async function closeBrowser() {
+  if (activeContext) {
+    await activeContext.close().catch(() => {});
+  }
+  activeContext = null;
+  activePage = null;
+}
+
 async function ensureLoggedIn(page) {
   await page.goto("https://www.figma.com/files/recent", { waitUntil: "domcontentloaded" });
 
   if (page.url().includes("/login")) {
     setState({
-      status: "waiting-login",
-      message: "Faca login na janela do navegador que abriu. O backup continua sozinho depois disso.",
+      message: "Faca login na janela do navegador que abriu. A busca continua sozinha depois disso.",
     });
 
     await page.waitForURL((url) => !url.toString().includes("/login"), { timeout: 0 });
@@ -114,72 +126,103 @@ async function saveLocalCopy(page, fileUrl, outputPath) {
   await download.saveAs(outputPath);
 }
 
-export async function runBackup({ fileKey, outputDir }) {
+export async function runDiscovery({ fileKey }) {
   cancelRequested = false;
-  const targetDir = outputDir || DEFAULT_OUTPUT_DIR;
-  fs.mkdirSync(targetDir, { recursive: true });
-  fs.mkdirSync(PROFILE_DIR, { recursive: true });
-
-  setState({ status: "running", message: "Abrindo navegador...", processed: 0, total: 0, errors: [] });
-
-  const context = await chromium.launchPersistentContext(PROFILE_DIR, {
-    headless: false,
-    viewport: { width: 1280, height: 800 },
+  setState({
+    phase: "discovering",
+    message: "Abrindo navegador...",
+    processed: 0,
+    total: 0,
+    files: [],
+    teamId: null,
+    errors: [],
   });
 
   try {
-    const page = context.pages()[0] || (await context.newPage());
-    await ensureLoggedIn(page);
+    fs.mkdirSync(PROFILE_DIR, { recursive: true });
+    activeContext = await chromium.launchPersistentContext(PROFILE_DIR, {
+      headless: false,
+      viewport: { width: 1280, height: 800 },
+    });
+    activePage = activeContext.pages()[0] || (await activeContext.newPage());
+
+    await ensureLoggedIn(activePage);
+    if (cancelRequested) {
+      setState({ phase: "cancelled", message: "Cancelado pelo usuario." });
+      await closeBrowser();
+      return;
+    }
 
     setState({ message: "Identificando o time do arquivo atual..." });
-    const teamId = await discoverTeamFromFile(page, fileKey);
+    const teamId = await discoverTeamFromFile(activePage, fileKey);
 
-    setState({ message: "Descobrindo arquivos do time..." });
-    const errors = [];
-    let files = [];
-
-    try {
-      files = await discoverFiles(page, teamId);
-    } catch (error) {
-      errors.push(`Time ${teamId}: ${error instanceof Error ? error.message : "erro ao listar arquivos"}`);
+    if (cancelRequested) {
+      setState({ phase: "cancelled", message: "Cancelado pelo usuario." });
+      await closeBrowser();
+      return;
     }
 
-    setState({ total: files.length });
-
-    const teamDir = path.join(targetDir, teamId);
-    fs.mkdirSync(teamDir, { recursive: true });
-
-    let processed = 0;
-    for (const file of files) {
-      if (cancelRequested) break;
-
-      const safeName = file.name.replace(/[^a-z0-9-_]+/gi, "_") || "arquivo";
-      const outputPath = path.join(teamDir, `${safeName}.fig`);
-
-      setState({ message: `Baixando ${file.name}...` });
-
-      try {
-        const fileUrl = file.href.startsWith("http") ? file.href : `https://www.figma.com${file.href}`;
-        await saveLocalCopy(page, fileUrl, outputPath);
-      } catch (error) {
-        errors.push(`${file.name}: ${error instanceof Error ? error.message : "erro ao salvar"}`);
-      }
-
-      processed += 1;
-      setState({ processed });
-    }
+    setState({ message: "Listando arquivos do time..." });
+    const files = await discoverFiles(activePage, teamId);
 
     setState({
-      status: cancelRequested ? "cancelled" : "done",
-      message: cancelRequested ? "Cancelado pelo usuario." : "Backup concluido.",
-      errors,
+      phase: "ready",
+      message: `${files.length} arquivo(s) encontrado(s).`,
+      files,
+      teamId,
     });
   } catch (error) {
     setState({
-      status: "error",
-      message: error instanceof Error ? error.message : "Erro inesperado",
+      phase: "error",
+      message: error instanceof Error ? error.message : "Erro inesperado ao listar arquivos",
     });
-  } finally {
-    await context.close();
+    await closeBrowser();
   }
+}
+
+export async function runDownload({ hrefs, outputDir }) {
+  if (!activePage || state.phase !== "ready") {
+    setState({ phase: "error", message: "Nenhuma lista de arquivos pronta. Refaca a busca." });
+    return;
+  }
+
+  cancelRequested = false;
+  const targetDir = outputDir || DEFAULT_OUTPUT_DIR;
+  const teamDir = path.join(targetDir, state.teamId);
+  fs.mkdirSync(teamDir, { recursive: true });
+
+  const hrefSet = new Set(hrefs);
+  const selected = state.files.filter((f) => hrefSet.has(f.href));
+
+  setState({ phase: "downloading", total: selected.length, processed: 0, message: "Iniciando downloads..." });
+
+  const errors = [];
+  let processed = 0;
+
+  for (const file of selected) {
+    if (cancelRequested) break;
+
+    const safeName = file.name.replace(/[^a-z0-9-_]+/gi, "_") || "arquivo";
+    const outputPath = path.join(teamDir, `${safeName}.fig`);
+
+    setState({ message: `Baixando ${file.name}...` });
+
+    try {
+      const fileUrl = file.href.startsWith("http") ? file.href : `https://www.figma.com${file.href}`;
+      await saveLocalCopy(activePage, fileUrl, outputPath);
+    } catch (error) {
+      errors.push(`${file.name}: ${error instanceof Error ? error.message : "erro ao salvar"}`);
+    }
+
+    processed += 1;
+    setState({ processed });
+  }
+
+  setState({
+    phase: cancelRequested ? "cancelled" : "done",
+    message: cancelRequested ? "Cancelado pelo usuario." : "Backup concluido.",
+    errors,
+  });
+
+  await closeBrowser();
 }

@@ -1,5 +1,5 @@
 import http from "node:http";
-import { runBackup, getStatus, cancelBackup } from "./automation.js";
+import { runDiscovery, runDownload, getStatus, cancelBackup } from "./automation.js";
 
 const PORT = 8722;
 
@@ -11,6 +11,22 @@ function sendJson(res, statusCode, data) {
     "Access-Control-Allow-Headers": "Content-Type",
   });
   res.end(JSON.stringify(data));
+}
+
+function readBody(req) {
+  return new Promise((resolve, reject) => {
+    let body = "";
+    req.on("data", (chunk) => {
+      body += chunk;
+    });
+    req.on("end", () => {
+      try {
+        resolve(JSON.parse(body || "{}"));
+      } catch {
+        reject(new Error("JSON invalido"));
+      }
+    });
+  });
 }
 
 const server = http.createServer((req, res) => {
@@ -29,26 +45,31 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  if (req.method === "POST" && req.url === "/start") {
-    let body = "";
-    req.on("data", (chunk) => {
-      body += chunk;
-    });
-    req.on("end", () => {
-      try {
-        const { fileKey, outputDir } = JSON.parse(body || "{}");
+  if (req.method === "POST" && req.url === "/discover") {
+    readBody(req)
+      .then(({ fileKey }) => {
         if (!fileKey) {
           sendJson(res, 400, { error: "fileKey e obrigatorio" });
           return;
         }
-        runBackup({ fileKey, outputDir }).catch((error) => {
-          console.error("Backup falhou:", error);
-        });
+        runDiscovery({ fileKey }).catch((error) => console.error("Descoberta falhou:", error));
         sendJson(res, 202, { started: true });
-      } catch {
-        sendJson(res, 400, { error: "JSON invalido" });
-      }
-    });
+      })
+      .catch(() => sendJson(res, 400, { error: "JSON invalido" }));
+    return;
+  }
+
+  if (req.method === "POST" && req.url === "/download") {
+    readBody(req)
+      .then(({ hrefs, outputDir }) => {
+        if (!Array.isArray(hrefs) || hrefs.length === 0) {
+          sendJson(res, 400, { error: "hrefs e obrigatorio" });
+          return;
+        }
+        runDownload({ hrefs, outputDir }).catch((error) => console.error("Download falhou:", error));
+        sendJson(res, 202, { started: true });
+      })
+      .catch(() => sendJson(res, 400, { error: "JSON invalido" }));
     return;
   }
 

@@ -47,6 +47,9 @@
         font-size: 11px;
         margin-top: 4px;
       }
+      .hint.error {
+        color: #d32f2f;
+      }
       .fileBox {
         background: #f5f5f5;
         border-radius: 6px;
@@ -59,48 +62,105 @@
         font-size: 13px;
         margin-bottom: 2px;
       }
+      .fileList {
+        max-height: 160px;
+        overflow-y: auto;
+        border: 1px solid #eee;
+        border-radius: 6px;
+        padding: 6px 8px;
+        margin: 8px 0;
+      }
+      .fileList label,
+      .selectAllRow {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 3px 0;
+        font-size: 12px;
+      }
+      .selectAllRow {
+        font-weight: 600;
+        border-bottom: 1px solid #eee;
+        padding-bottom: 6px;
+        margin-bottom: 4px;
+      }
     </style>
   </head>
   <body>
     <h2>Backup Completo (.fig)</h2>
     <p>
-      Baixa o arquivo <code>.fig</code> nativo de todos os arquivos do time
-      do arquivo atual. Requer o <strong>helper local</strong> rodando na
-      sua maquina (dois cliques em <code>helper/start.command</code>) — ele
-      abre uma janela de navegador e automatiza o "Save local copy" arquivo
-      por arquivo. Drafts pessoais continuam fora do escopo.
+      Baixa o arquivo <code>.fig</code> nativo dos arquivos do time do
+      arquivo atual. Drafts pessoais continuam fora do escopo.
     </p>
-
-    <div class="fileBox" id="fileBox">Identificando arquivo atual...</div>
     <div id="envNotice" class="hint"></div>
 
-    <button id="fullBackupStart" disabled>Iniciar Backup Completo (.fig)</button>
-    <button id="fullBackupCancel" style="background:#888; display:none;">
-      Cancelar
-    </button>
-    <div id="fullBackupStatus" class="status"></div>
+    <div id="step1">
+      <p>
+        Antes de comecar, inicie o helper local: de dois cliques em
+        <code>helper/start.command</code> no Finder e deixe a janela do
+        Terminal aberta.
+      </p>
+      <button id="checkHelper">Iniciar Backup</button>
+      <div id="step1Status" class="status"></div>
+    </div>
+
+    <div id="step2" style="display: none">
+      <div class="fileBox" id="fileBox"></div>
+      <div id="filesLoading" class="hint"></div>
+
+      <div id="fileListWrap" style="display: none">
+        <div class="fileList">
+          <label class="selectAllRow">
+            <input type="checkbox" id="selectAll" /> Selecionar todos
+          </label>
+          <div id="fileList"></div>
+        </div>
+      </div>
+
+      <button id="startBackup" disabled>Iniciar Backup</button>
+      <button id="cancelBackup" style="background: #888; display: none">
+        Cancelar
+      </button>
+      <div id="backupStatus" class="status"></div>
+    </div>
 
     <script>
       const HELPER_URL = "http://localhost:8722";
 
-      const fileBox = document.getElementById("fileBox");
       const envNotice = document.getElementById("envNotice");
-      const fullBackupStart = document.getElementById("fullBackupStart");
-      const fullBackupCancel = document.getElementById("fullBackupCancel");
-      const fullBackupStatus = document.getElementById("fullBackupStatus");
+      const step1 = document.getElementById("step1");
+      const step2 = document.getElementById("step2");
+      const checkHelperBtn = document.getElementById("checkHelper");
+      const step1Status = document.getElementById("step1Status");
+
+      const fileBox = document.getElementById("fileBox");
+      const filesLoading = document.getElementById("filesLoading");
+      const fileListWrap = document.getElementById("fileListWrap");
+      const fileListEl = document.getElementById("fileList");
+      const selectAll = document.getElementById("selectAll");
+      const startBackupBtn = document.getElementById("startBackup");
+      const cancelBackupBtn = document.getElementById("cancelBackup");
+      const backupStatus = document.getElementById("backupStatus");
 
       let currentFileKey = null;
-
-      window.onload = () => {
-        parent.postMessage({ pluginMessage: { type: "get-file-context" } }, "*");
-      };
+      let currentFileName = null;
+      let helperConnected = false;
+      let discoveryStarted = false;
+      let discoveryPollTimer = null;
+      let backupPollTimer = null;
 
       // Deteccao best-effort: o app Desktop do Figma customiza o user agent.
       // Nao ha API oficial para isso, entao trate como um palpite, nao certeza.
       const looksLikeDesktopApp = /Figma\//i.test(navigator.userAgent);
       envNotice.textContent = looksLikeDesktopApp
         ? "Detectado: app Desktop. Uma janela de navegador vai abrir para automatizar o backup."
-        : "Detectado: navegador. O botao aciona o helper local diretamente.";
+        : "Detectado: navegador. O helper local roda como um servico separado mesmo assim.";
+
+      window.onload = () => {
+        parent.postMessage({ pluginMessage: { type: "get-file-context" } }, "*");
+        tryConnectHelper();
+        setInterval(tryConnectHelper, 2000);
+      };
 
       onmessage = (event) => {
         const msg = event.data.pluginMessage;
@@ -108,83 +168,168 @@
 
         if (msg.type === "file-context") {
           currentFileKey = msg.fileKey;
-          if (currentFileKey) {
-            fileBox.innerHTML = `<strong>${msg.fileName}</strong>Backup vai usar o time deste arquivo.`;
-            fullBackupStart.disabled = false;
-          } else {
-            fileBox.textContent =
-              "Nao foi possivel identificar este arquivo. Salve-o no Figma antes de continuar.";
-          }
+          currentFileName = msg.fileName;
+          maybeStartDiscovery();
         }
       };
 
-      let pollTimer = null;
+      function tryConnectHelper() {
+        if (helperConnected) return;
 
-      function stopPolling() {
-        if (pollTimer) {
-          clearInterval(pollTimer);
-          pollTimer = null;
-        }
-      }
-
-      function renderFullBackupStatus(data) {
-        if (data.total > 0) {
-          fullBackupStatus.textContent = `${data.message} (${data.processed}/${data.total})`;
-        } else {
-          fullBackupStatus.textContent = data.message || data.status;
-        }
-
-        if (data.status === "done" || data.status === "cancelled" || data.status === "error") {
-          stopPolling();
-          fullBackupStart.disabled = false;
-          fullBackupCancel.style.display = "none";
-          fullBackupStatus.className = data.status === "error" ? "status error" : "status";
-          if (data.errors && data.errors.length) {
-            console.error(data.errors);
-            fullBackupStatus.textContent += ` — ${data.errors.length} erro(s) (veja o console)`;
-          }
-        }
-      }
-
-      function pollStatus() {
         fetch(`${HELPER_URL}/status`)
-          .then((res) => res.json())
-          .then(renderFullBackupStatus)
+          .then((res) => {
+            if (!res.ok) throw new Error();
+            helperConnected = true;
+            step1.style.display = "none";
+            step2.style.display = "block";
+            maybeStartDiscovery();
+          })
           .catch(() => {
-            stopPolling();
-            fullBackupStatus.className = "status error";
-            fullBackupStatus.textContent = "Perdeu conexao com o helper local.";
-            fullBackupStart.disabled = false;
-            fullBackupCancel.style.display = "none";
+            step1Status.textContent = "Aguardando o helper local iniciar...";
           });
       }
 
-      fullBackupStart.onclick = () => {
-        if (!currentFileKey) return;
+      checkHelperBtn.onclick = () => {
+        step1Status.textContent = "Verificando conexao...";
+        tryConnectHelper();
+      };
 
-        fullBackupStart.disabled = true;
-        fullBackupStatus.className = "status";
-        fullBackupStatus.textContent = "Conectando ao helper local...";
+      function maybeStartDiscovery() {
+        if (!helperConnected || !currentFileKey || discoveryStarted) return;
+        discoveryStarted = true;
 
-        fetch(`${HELPER_URL}/start`, {
+        fileBox.innerHTML = `<strong>${currentFileName}</strong>Buscando arquivos do time deste arquivo...`;
+        filesLoading.className = "hint";
+        filesLoading.textContent = "Conectando...";
+
+        fetch(`${HELPER_URL}/discover`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ fileKey: currentFileKey }),
         })
           .then((res) => {
-            if (!res.ok) throw new Error("helper recusou a requisicao");
-            fullBackupCancel.style.display = "block";
-            pollTimer = setInterval(pollStatus, 1500);
+            if (!res.ok) throw new Error();
+            pollDiscovery();
           })
           .catch(() => {
-            fullBackupStart.disabled = false;
-            fullBackupStatus.className = "status error";
-            fullBackupStatus.textContent =
-              "Nao foi possivel conectar ao helper local. Rode 'helper/start.command' e tente novamente.";
+            filesLoading.className = "hint error";
+            filesLoading.textContent = "Nao foi possivel iniciar a busca de arquivos.";
+          });
+      }
+
+      function pollDiscovery() {
+        discoveryPollTimer = setInterval(() => {
+          fetch(`${HELPER_URL}/status`)
+            .then((res) => res.json())
+            .then((data) => {
+              filesLoading.textContent = data.message || "Buscando arquivos...";
+
+              if (data.phase === "ready") {
+                clearInterval(discoveryPollTimer);
+                filesLoading.style.display = "none";
+                renderFileList(data.files || []);
+              }
+
+              if (data.phase === "error" || data.phase === "cancelled") {
+                clearInterval(discoveryPollTimer);
+                filesLoading.className = "hint error";
+                filesLoading.textContent = `Erro: ${data.message}`;
+              }
+            })
+            .catch(() => clearInterval(discoveryPollTimer));
+        }, 1500);
+      }
+
+      function renderFileList(files) {
+        fileListWrap.style.display = "block";
+        fileListEl.innerHTML = files
+          .map(
+            (f, i) => `
+            <label>
+              <input type="checkbox" class="fileCheckbox" data-index="${i}" />
+              ${f.name}
+            </label>`
+          )
+          .join("");
+
+        window.__discoveredFiles = files;
+
+        document.querySelectorAll(".fileCheckbox").forEach((cb) => {
+          cb.addEventListener("change", updateStartButtonState);
+        });
+      }
+
+      selectAll.onchange = () => {
+        document.querySelectorAll(".fileCheckbox").forEach((cb) => {
+          cb.checked = selectAll.checked;
+        });
+        updateStartButtonState();
+      };
+
+      function updateStartButtonState() {
+        const anyChecked = Array.from(document.querySelectorAll(".fileCheckbox")).some(
+          (cb) => cb.checked
+        );
+        startBackupBtn.disabled = !anyChecked;
+      }
+
+      startBackupBtn.onclick = () => {
+        const files = window.__discoveredFiles || [];
+        const hrefs = Array.from(document.querySelectorAll(".fileCheckbox"))
+          .filter((cb) => cb.checked)
+          .map((cb) => files[Number(cb.dataset.index)].href);
+
+        if (hrefs.length === 0) return;
+
+        startBackupBtn.disabled = true;
+        backupStatus.className = "status";
+        backupStatus.textContent = "Iniciando downloads...";
+
+        fetch(`${HELPER_URL}/download`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ hrefs }),
+        })
+          .then((res) => {
+            if (!res.ok) throw new Error();
+            cancelBackupBtn.style.display = "block";
+            backupPollTimer = setInterval(pollBackupStatus, 1500);
+          })
+          .catch(() => {
+            updateStartButtonState();
+            backupStatus.className = "status error";
+            backupStatus.textContent = "Nao foi possivel iniciar o download.";
           });
       };
 
-      fullBackupCancel.onclick = () => {
+      function pollBackupStatus() {
+        fetch(`${HELPER_URL}/status`)
+          .then((res) => res.json())
+          .then((data) => {
+            if (data.total > 0) {
+              backupStatus.textContent = `${data.message} (${data.processed}/${data.total})`;
+            } else {
+              backupStatus.textContent = data.message || data.phase;
+            }
+
+            if (data.phase === "done" || data.phase === "cancelled" || data.phase === "error") {
+              clearInterval(backupPollTimer);
+              cancelBackupBtn.style.display = "none";
+              backupStatus.className = data.phase === "error" ? "status error" : "status";
+              if (data.errors && data.errors.length) {
+                console.error(data.errors);
+                backupStatus.textContent += ` — ${data.errors.length} erro(s) (veja o console)`;
+              }
+            }
+          })
+          .catch(() => {
+            clearInterval(backupPollTimer);
+            backupStatus.className = "status error";
+            backupStatus.textContent = "Perdeu conexao com o helper local.";
+          });
+      }
+
+      cancelBackupBtn.onclick = () => {
         fetch(`${HELPER_URL}/cancel`, { method: "POST" }).catch(() => {});
       };
     </script>
