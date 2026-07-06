@@ -71,18 +71,26 @@ rodam sempre num iframe isolado (sandbox), sem esse tipo de permissao,
 independente de onde rodam. Por isso essa automacao precisa de um processo
 separado no seu computador: o helper local em `helper/`.
 
-**Setup (uma vez), forma recomendada — dois cliques:**
+**Instalacao (uma unica vez na vida) — dois cliques:**
 
-De dois cliques em `helper/start.command` no Finder. Ele detecta sozinho o
-que falta (dependencias, navegador do Playwright) e so instala na primeira
-vez; nas proximas, so sobe o servidor direto. Deixe essa janela do Terminal
-aberta enquanto for usar a opcao "Backup Completo (.fig)" no plugin.
+De dois cliques em `helper/install.command` no Finder. Ele instala o
+helper como um **servico em segundo plano do macOS** (LaunchAgent): fica
+rodando sozinho a partir de agora, reinicia automaticamente se cair, e
+volta a subir sozinho sempre que voce ligar o Mac — sem terminal visivel,
+sem precisar rodar nada de novo.
 
-Isso funciona porque `start.command` roda fora do plugin, diretamente no
-seu Mac — o plugin em si nao tem permissao para abrir terminal nem instalar
-nada (mesmo sandbox que impede a automacao direta do "Save local copy").
+Isso e diferente de "abrir o app toda vez que for usar": e uma instalacao
+que acontece uma unica vez. Se quiser desativar o servico depois, rode
+`helper/uninstall.command`.
 
-**Alternativa manual** (equivalente ao que o `start.command` faz):
+Isso funciona porque `install.command` roda fora do plugin, diretamente no
+seu Mac — o plugin em si nao tem permissao para abrir terminal, instalar
+nada nem registrar servicos (mesmo sandbox que impede a automacao direta
+do "Save local copy"). Nenhum "autorizar" dentro do plugin destrava isso;
+por isso a instalacao precisa ser esse passo manual, uma vez, fora dele.
+
+**Alternativa manual** (equivalente ao que o `install.command` faz, mas
+sem virar servico persistente — precisa rodar de novo a cada reinicio):
 
 ```bash
 cd helper
@@ -93,13 +101,15 @@ npm start                  # sobe o servidor em http://localhost:8722
 
 **Uso (fluxo em duas etapas):**
 
-1. **Etapa 1 — conectar o helper.** Abra o arquivo que representa o time
-   que voce quer fazer backup e rode o plugin. Se o helper local ainda nao
-   estiver rodando, a UI mostra as instrucoes e um botao **Iniciar
-   Backup** que verifica a conexao com `http://localhost:8722`. O plugin
-   nao consegue abrir o `start.command` sozinho (sandbox sem permissao pra
-   isso), entao ele so re-verifica a cada poucos segundos — assim que voce
-   der os dois cliques no `start.command`, a UI avanca sozinha pra etapa 2.
+1. **Etapa 1 — autorizar/conectar o helper.** So aparece se o helper
+   ainda nao foi instalado nesta maquina. Abra o arquivo que representa o
+   time que voce quer fazer backup e rode o plugin; a UI mostra a
+   instrucao de instalacao e um botao **Autorizar automacao**, que
+   verifica a conexao com `http://localhost:8722`. Como o plugin nao
+   consegue instalar o servico sozinho, ele so re-verifica a cada poucos
+   segundos — assim que voce rodar o `install.command` (uma vez na vida),
+   a UI avanca sozinha pra etapa 2 e nunca mais volta pra etapa 1 nesta
+   maquina.
 2. **Etapa 2 — escolher e baixar.** Assim que o helper responde, o plugin
    automaticamente pede pra ele descobrir o `team_id` do arquivo atual
    (navegando arquivo → projeto → time na interface real do Figma) e
@@ -134,9 +144,10 @@ npm start                  # sobe o servidor em http://localhost:8722
 │   └── ui.html            # Interface exibida ao usuario
 ├── helper/                # Helper local (Node + Playwright) p/ backup .fig
 │   ├── package.json
-│   ├── start.command       # Setup + start em dois cliques (Finder)
+│   ├── install.command     # Instala como servico em 2o plano (uma vez)
+│   ├── uninstall.command    # Remove o servico
 │   └── src/
-│       ├── server.js       # HTTP local (start/status/cancel)
+│       ├── server.js       # HTTP local (discover/download/status/cancel)
 │       ├── automation.js   # Automacao Playwright (login, navegacao, save)
 │       └── selectors.js     # Seletores isolados (ponto de ajuste se quebrar)
 ├── dist/                  # Saida do build (gerado, nao versionado)
