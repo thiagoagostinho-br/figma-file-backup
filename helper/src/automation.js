@@ -93,8 +93,16 @@ async function ensureLoggedIn(page) {
   }
 }
 
+// O editor do Figma mantem conexoes em tempo real sempre ativas (colaboracao
+// ao vivo), entao "networkidle" nunca e satisfeito nessas paginas -- espera
+// so o DOM carregar e da um tempo fixo pra SPA renderizar.
+async function gotoAndSettle(page, url, settleMs = 2000) {
+  await page.goto(url, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(settleMs);
+}
+
 async function discoverTeamFromFile(page, fileKey) {
-  await page.goto(`https://www.figma.com/file/${fileKey}`, { waitUntil: "networkidle" });
+  await gotoAndSettle(page, `https://www.figma.com/file/${fileKey}`);
 
   const projectHref = await page
     .locator(SELECTORS.projectLink)
@@ -109,7 +117,7 @@ async function discoverTeamFromFile(page, fileKey) {
   const projectUrl = projectHref.startsWith("http")
     ? projectHref
     : `https://www.figma.com${projectHref}`;
-  await page.goto(projectUrl, { waitUntil: "networkidle" });
+  await gotoAndSettle(page, projectUrl);
 
   const teamHref = await page
     .locator(SELECTORS.teamLink)
@@ -146,7 +154,7 @@ async function scrapeFileLinks(page) {
 }
 
 async function discoverFilesViaContributions(page, teamId) {
-  await page.goto(`https://www.figma.com/files/team/${teamId}`, { waitUntil: "networkidle" });
+  await gotoAndSettle(page, `https://www.figma.com/files/team/${teamId}`);
 
   const teamName = await page.title().then((t) => t.split("–")[0]?.trim() || `Time ${teamId}`);
 
@@ -165,21 +173,20 @@ async function discoverFilesViaContributions(page, teamId) {
     throw new Error("Aba 'File contributions' nao encontrada (selector desatualizado?).");
   }
   await contributionsTab.click();
-  await page.waitForLoadState("networkidle");
+  await page.waitForTimeout(2000);
 
   const files = await scrapeFileLinks(page);
   return files.map((f) => ({ ...f, project: teamName }));
 }
 
 async function discoverDraftFiles(page) {
-  await page.goto("https://www.figma.com/files/recent", { waitUntil: "networkidle" });
+  await gotoAndSettle(page, "https://www.figma.com/files/recent");
   const files = await scrapeFileLinks(page);
   return files.map((f) => ({ ...f, project: "Drafts" }));
 }
 
 async function saveLocalCopy(page, fileUrl, outputPath) {
-  await page.goto(fileUrl, { waitUntil: "networkidle" });
-  await page.waitForTimeout(1500);
+  await gotoAndSettle(page, fileUrl);
 
   await page.click(SELECTORS.mainMenuButton);
 
