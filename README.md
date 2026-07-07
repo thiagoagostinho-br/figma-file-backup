@@ -1,9 +1,8 @@
 # File Backup (Figma Plugin)
 
 Plugin para Figma que baixa o `.fig` nativo de todos os arquivos do time
-do arquivo atualmente aberto. Sem JSON, sem configuracao manual de time:
-o time é detectado automaticamente a partir do arquivo aberto no momento
-em que o plugin roda.
+de um arquivo indicado por voce (cole o link uma vez). Sem JSON, sem
+precisar saber o `team_id` — so o link do arquivo.
 
 Aciona um helper local (`helper/`, Node + Playwright) que abre uma janela
 de navegador e automatiza o "Save local copy" arquivo por arquivo, baixando
@@ -20,13 +19,21 @@ o `.fig` real (nao um JSON).
   verdade logado como o usuario, ele visita
   `https://www.figma.com/files/recent` e inclui esses arquivos na lista
   (rotulados como projeto "Drafts").
-- **Deteccao do time e da lista de arquivos e best-effort**: o plugin le
-  `figma.fileKey` (API oficial, confiavel) e passa pro helper, mas o
-  helper precisa navegar pela interface web do Figma pra descobrir o
-  `team_id` (arquivo → projeto → time) e depois listar os arquivos que o
-  usuario contribuiu (time → membros → propria conta → aba "File
-  contributions"), porque nao existe endpoint de API pra nenhuma dessas
-  consultas. Esses passos (`discoverTeamFromFile` e
+- **`figma.fileKey` nao funciona em plugins publicos**: e uma API privada,
+  disponivel so para plugins internos de organizacao
+  (`enablePrivatePluginApi`, exige plano Enterprise) — em qualquer outro
+  plugin, incluindo este, ela sempre retorna `undefined`. Foi tentado usar
+  essa API para detectar o arquivo atual automaticamente e nao funcionou
+  por esse motivo (confirmado no forum oficial do Figma). A solucao usada
+  aqui, e a mesma recomendada pela propria comunidade Figma para esse
+  caso: pedir pro usuario colar o link do arquivo (`Copy link` no menu do
+  Figma), e extrair o `fileKey` da URL via regex no proprio plugin.
+- **Deteccao do time e da lista de arquivos e best-effort**: a partir do
+  `fileKey` extraido do link colado, o helper navega pela interface web do
+  Figma pra descobrir o `team_id` (arquivo → projeto → time) e depois
+  listar os arquivos que o usuario contribuiu (time → membros → propria
+  conta → aba "File contributions"), porque nao existe endpoint de API pra
+  nenhuma dessas consultas. Esses passos (`discoverTeamFromFile` e
   `discoverFilesViaContributions` em `helper/src/automation.js`) sao os
   mais provaveis de precisar ajuste depois do primeiro teste real —
   especialmente a etapa de achar a propria conta na lista de membros
@@ -117,14 +124,16 @@ npm start                  # sobe o servidor em http://localhost:8722
    segundos — assim que voce rodar o `install.command` (uma vez na vida),
    a UI avanca sozinha pra etapa 2 e nunca mais volta pra etapa 1 nesta
    maquina.
-2. **Etapa 2 — escolher e baixar.** Assim que o helper responde, ele
-   descobre o `team_id` do arquivo atual (arquivo → projeto → time),
-   entra em Membros → sua propria conta → aba "File contributions" pra
-   listar todo arquivo desse time que voce contribuiu, e tambem visita
-   Drafts pra incluir seus arquivos pessoais. A lista aparece com uma
-   checkbox por arquivo, nome e o projeto de origem (nome do time ou
-   "Drafts"), mais um "Selecionar todos"; o botao **Iniciar Backup** fica
-   desabilitado ate voce marcar pelo menos um.
+2. **Etapa 2 — colar o link e buscar.** Cole o link de qualquer arquivo do
+   time que voce quer fazer backup (menu do arquivo no Figma → Copy link)
+   e clique em **Buscar arquivos**. O helper extrai o `fileKey` do link,
+   descobre o `team_id` (arquivo → projeto → time), entra em Membros →
+   sua propria conta → aba "File contributions" pra listar todo arquivo
+   desse time que voce contribuiu, e tambem visita Drafts pra incluir seus
+   arquivos pessoais. A lista aparece com uma checkbox por arquivo, nome e
+   o projeto de origem (nome do time ou "Drafts"), mais um "Selecionar
+   todos"; o botao **Iniciar Backup** fica desabilitado ate voce marcar
+   pelo menos um.
 3. Ao clicar em Iniciar Backup, uma janela de navegador separada abre
    (controlada pelo Playwright, a mesma sessao aberta na etapa 2). No
    primeiro uso geral, faca login manualmente nela — a sessao fica salva

@@ -50,17 +50,19 @@
       .hint.error {
         color: #d32f2f;
       }
-      .fileBox {
-        background: #f5f5f5;
-        border-radius: 6px;
-        padding: 8px 10px;
-        margin: 10px 0;
+      input[type="text"] {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 6px 8px;
+        border: 1px solid #ccc;
+        border-radius: 4px;
         font-size: 12px;
+        font-family: inherit;
       }
-      .fileBox strong {
+      label.fieldLabel {
         display: block;
-        font-size: 13px;
-        margin-bottom: 2px;
+        font-weight: 600;
+        margin-bottom: 4px;
       }
       .fileList {
         max-height: 160px;
@@ -107,7 +109,18 @@
     </div>
 
     <div id="step2" style="display: none">
-      <div class="fileBox" id="fileBox"></div>
+      <label class="fieldLabel" for="fileUrlInput">Link do arquivo atual</label>
+      <input
+        id="fileUrlInput"
+        type="text"
+        placeholder="Cole aqui: https://figma.com/design/..."
+      />
+      <div class="hint">
+        No Figma: menu do arquivo &rarr; Copy link (ou Cmd/Ctrl+L). Plugins
+        publicos nao tem acesso direto ao identificador do arquivo aberto,
+        entao esse link e a forma confiavel de apontar qual time buscar.
+      </div>
+      <button id="findFilesBtn">Buscar arquivos</button>
       <div id="filesLoading" class="hint"></div>
 
       <div id="fileListWrap" style="display: none">
@@ -135,7 +148,8 @@
       const checkHelperBtn = document.getElementById("checkHelper");
       const step1Status = document.getElementById("step1Status");
 
-      const fileBox = document.getElementById("fileBox");
+      const fileUrlInput = document.getElementById("fileUrlInput");
+      const findFilesBtn = document.getElementById("findFilesBtn");
       const filesLoading = document.getElementById("filesLoading");
       const fileListWrap = document.getElementById("fileListWrap");
       const fileListEl = document.getElementById("fileList");
@@ -144,10 +158,7 @@
       const cancelBackupBtn = document.getElementById("cancelBackup");
       const backupStatus = document.getElementById("backupStatus");
 
-      let currentFileKey = null;
-      let currentFileName = null;
       let helperConnected = false;
-      let discoveryStarted = false;
       let discoveryPollTimer = null;
       let backupPollTimer = null;
 
@@ -159,20 +170,8 @@
         : "Detectado: navegador. O helper local roda como um servico separado mesmo assim.";
 
       window.onload = () => {
-        parent.postMessage({ pluginMessage: { type: "get-file-context" } }, "*");
         tryConnectHelper();
         setInterval(tryConnectHelper, 2000);
-      };
-
-      onmessage = (event) => {
-        const msg = event.data.pluginMessage;
-        if (!msg) return;
-
-        if (msg.type === "file-context") {
-          currentFileKey = msg.fileKey;
-          currentFileName = msg.fileName;
-          maybeStartDiscovery();
-        }
       };
 
       function tryConnectHelper() {
@@ -184,7 +183,6 @@
             helperConnected = true;
             step1.style.display = "none";
             step2.style.display = "block";
-            maybeStartDiscovery();
           })
           .catch(() => {
             step1Status.textContent = "Aguardando o helper local iniciar...";
@@ -196,28 +194,40 @@
         tryConnectHelper();
       };
 
-      function maybeStartDiscovery() {
-        if (!helperConnected || !currentFileKey || discoveryStarted) return;
-        discoveryStarted = true;
+      function extractFileKey(url) {
+        const match = url.match(/figma\.com\/(?:file|design)\/([a-zA-Z0-9]+)/);
+        return match ? match[1] : null;
+      }
 
-        fileBox.innerHTML = `<strong>${currentFileName}</strong>Buscando arquivos do time deste arquivo...`;
+      findFilesBtn.onclick = () => {
+        const fileKey = extractFileKey(fileUrlInput.value.trim());
+
+        if (!fileKey) {
+          filesLoading.className = "hint error";
+          filesLoading.textContent =
+            "Link invalido. Copie o link do arquivo pelo Figma (menu do arquivo > Copy link).";
+          return;
+        }
+
+        findFilesBtn.disabled = true;
         filesLoading.className = "hint";
         filesLoading.textContent = "Conectando...";
 
         fetch(`${HELPER_URL}/discover`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ fileKey: currentFileKey }),
+          body: JSON.stringify({ fileKey }),
         })
           .then((res) => {
             if (!res.ok) throw new Error();
             pollDiscovery();
           })
           .catch(() => {
+            findFilesBtn.disabled = false;
             filesLoading.className = "hint error";
             filesLoading.textContent = "Nao foi possivel iniciar a busca de arquivos.";
           });
-      }
+      };
 
       function pollDiscovery() {
         discoveryPollTimer = setInterval(() => {
@@ -228,12 +238,21 @@
 
               if (data.phase === "ready") {
                 clearInterval(discoveryPollTimer);
-                filesLoading.style.display = "none";
-                renderFileList(data.files || []);
+                findFilesBtn.disabled = false;
+                if (data.files && data.files.length > 0) {
+                  filesLoading.style.display = "none";
+                  renderFileList(data.files);
+                } else {
+                  filesLoading.className = "hint error";
+                  filesLoading.textContent = (data.errors || []).length
+                    ? `Nenhum arquivo encontrado. ${data.errors.join(" / ")}`
+                    : "Nenhum arquivo encontrado.";
+                }
               }
 
               if (data.phase === "error" || data.phase === "cancelled") {
                 clearInterval(discoveryPollTimer);
+                findFilesBtn.disabled = false;
                 filesLoading.className = "hint error";
                 filesLoading.textContent = `Erro: ${data.message}`;
               }

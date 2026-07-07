@@ -52,6 +52,7 @@ const server = http.createServer((req, res) => {
           sendJson(res, 400, { error: "fileKey e obrigatorio" });
           return;
         }
+        console.log(`[${new Date().toISOString()}] POST /discover fileKey=${fileKey}`);
         runDiscovery({ fileKey }).catch((error) => console.error("Descoberta falhou:", error));
         sendJson(res, 202, { started: true });
       })
@@ -66,6 +67,7 @@ const server = http.createServer((req, res) => {
           sendJson(res, 400, { error: "hrefs e obrigatorio" });
           return;
         }
+        console.log(`[${new Date().toISOString()}] POST /download hrefs=${hrefs.length}`);
         runDownload({ hrefs, outputDir }).catch((error) => console.error("Download falhou:", error));
         sendJson(res, 202, { started: true });
       })

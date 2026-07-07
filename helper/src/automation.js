@@ -32,6 +32,9 @@ export function cancelBackup() {
 
 function setState(partial) {
   state = { ...state, ...partial };
+  const stamp = new Date().toISOString();
+  const summary = { phase: state.phase, message: state.message, processed: state.processed, total: state.total };
+  console.log(`[${stamp}] ${JSON.stringify(summary)}`);
 }
 
 async function closeBrowser() {
