@@ -45,6 +45,35 @@ async function closeBrowser() {
   activePage = null;
 }
 
+async function launchBrowserContext() {
+  fs.mkdirSync(PROFILE_DIR, { recursive: true });
+  const launchArgs = ["--disable-blink-features=AutomationControlled"];
+  const baseOptions = {
+    headless: false,
+    viewport: { width: 1280, height: 800 },
+    args: launchArgs,
+  };
+
+  let context;
+  try {
+    // Usa o Chrome instalado de verdade (nao o Chromium empacotado com o
+    // Playwright) -- reduz um pouco a chance do Google bloquear o login
+    // por deteccao de automacao, mas nao elimina totalmente.
+    context = await chromium.launchPersistentContext(PROFILE_DIR, {
+      ...baseOptions,
+      channel: "chrome",
+    });
+  } catch {
+    context = await chromium.launchPersistentContext(PROFILE_DIR, baseOptions);
+  }
+
+  await context.addInitScript(() => {
+    Object.defineProperty(navigator, "webdriver", { get: () => undefined });
+  });
+
+  return context;
+}
+
 async function ensureLoggedIn(page) {
   await page.goto("https://www.figma.com/files/recent", { waitUntil: "domcontentloaded" });
 
@@ -53,7 +82,14 @@ async function ensureLoggedIn(page) {
       message: "Faca login na janela do navegador que abriu. A busca continua sozinha depois disso.",
     });
 
-    await page.waitForURL((url) => !url.toString().includes("/login"), { timeout: 0 });
+    try {
+      await page.waitForURL((url) => !url.toString().includes("/login"), { timeout: 0 });
+    } catch (error) {
+      if (page.isClosed()) {
+        throw new Error("A janela do navegador foi fechada antes do login ser concluido.");
+      }
+      throw error;
+    }
   }
 }
 
@@ -172,11 +208,7 @@ export async function runDiscovery({ fileKey }) {
   });
 
   try {
-    fs.mkdirSync(PROFILE_DIR, { recursive: true });
-    activeContext = await chromium.launchPersistentContext(PROFILE_DIR, {
-      headless: false,
-      viewport: { width: 1280, height: 800 },
-    });
+    activeContext = await launchBrowserContext();
     activePage = activeContext.pages()[0] || (await activeContext.newPage());
 
     await ensureLoggedIn(activePage);
