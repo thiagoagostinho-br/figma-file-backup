@@ -35,7 +35,10 @@ function sendMessageToTab(tabId, message, timeoutMs = 10000) {
   });
 }
 
-async function waitForTabReady(tabId, attempts = 20) {
+// O editor do Figma (pesado, motor de canvas) pode demorar bastante pra
+// carregar, e o Chrome desacelera abas em segundo plano -- por isso o
+// numero alto de tentativas aqui (ate 45s no total).
+async function waitForTabReady(tabId, attempts = 60) {
   for (let i = 0; i < attempts; i++) {
     try {
       const res = await sendMessageToTab(tabId, { type: "PING" }, 2000);
@@ -43,36 +46,43 @@ async function waitForTabReady(tabId, attempts = 20) {
     } catch {
       // content script ainda nao injetado nessa navegacao, tenta de novo
     }
-    await new Promise((r) => setTimeout(r, 500));
+    await new Promise((r) => setTimeout(r, 750));
   }
   return false;
 }
 
 async function openTabAndWait(url) {
+  console.log(`[figma-backup] abrindo aba: ${url}`);
   const tab = await chrome.tabs.create({ url, active: false });
   const ready = await waitForTabReady(tab.id);
   if (!ready) {
+    console.error(`[figma-backup] timeout esperando content script em: ${url} (tab ${tab.id})`);
     await chrome.tabs.remove(tab.id).catch(() => {});
     throw new Error(`Nao foi possivel carregar ${url}`);
   }
+  console.log(`[figma-backup] aba pronta: ${url} (tab ${tab.id})`);
   return tab;
 }
 
 async function discoverTeamFromFile(fileUrl) {
   const fileTab = await openTabAndWait(fileUrl);
   try {
+    console.log("[figma-backup] procurando link do projeto na pagina do arquivo...");
     const { projectHref } = await sendMessageToTab(fileTab.id, { type: "FIND_TEAM_PROJECT_LINKS" });
     if (!projectHref) throw new Error("Projeto nao encontrado no arquivo atual (selector desatualizado?).");
+    console.log(`[figma-backup] projeto encontrado: ${projectHref}`);
 
     const projectUrl = projectHref.startsWith("http") ? projectHref : `https://www.figma.com${projectHref}`;
     await chrome.tabs.update(fileTab.id, { url: projectUrl });
     await waitForTabReady(fileTab.id);
 
+    console.log("[figma-backup] procurando link do time na pagina do projeto...");
     const { teamHref } = await sendMessageToTab(fileTab.id, { type: "FIND_TEAM_PROJECT_LINKS" });
     if (!teamHref) throw new Error("Time nao encontrado no projeto atual (selector desatualizado?).");
 
     const match = teamHref.match(/\/files\/team\/(\d+)/);
     if (!match) throw new Error(`ID do time nao reconhecido na URL: ${teamHref}`);
+    console.log(`[figma-backup] time identificado: ${match[1]}`);
 
     return { teamId: match[1], tabId: fileTab.id };
   } catch (error) {
@@ -86,21 +96,25 @@ async function discoverFilesViaContributions(tabId, teamId) {
   await waitForTabReady(tabId);
   await new Promise((r) => setTimeout(r, 1000));
 
+  console.log("[figma-backup] clicando em Membros...");
   const membersResult = await sendMessageToTab(tabId, { type: "CLICK_MEMBERS" });
   if (!membersResult.ok) throw new Error("Nao encontrou o menu de Membros (selector desatualizado?).");
   await new Promise((r) => setTimeout(r, 800));
 
+  console.log("[figma-backup] clicando na propria conta...");
   const selfResult = await sendMessageToTab(tabId, { type: "CLICK_SELF_MEMBER" });
   if (!selfResult.ok) {
     throw new Error("Nao encontrou sua propria conta na lista de membros (selector desatualizado?).");
   }
   await new Promise((r) => setTimeout(r, 800));
 
+  console.log("[figma-backup] clicando em File contributions...");
   const contribResult = await sendMessageToTab(tabId, { type: "CLICK_FILE_CONTRIBUTIONS" });
   if (!contribResult.ok) throw new Error("Aba 'File contributions' nao encontrada (selector desatualizado?).");
   await new Promise((r) => setTimeout(r, 1200));
 
   const { files } = await sendMessageToTab(tabId, { type: "SCRAPE_FILES" });
+  console.log(`[figma-backup] File contributions: ${files.length} arquivo(s) encontrado(s).`);
   return files;
 }
 
@@ -109,6 +123,7 @@ async function discoverDraftFiles(tabId) {
   await waitForTabReady(tabId);
   await new Promise((r) => setTimeout(r, 1000));
   const { files } = await sendMessageToTab(tabId, { type: "SCRAPE_FILES" });
+  console.log(`[figma-backup] Drafts: ${files.length} arquivo(s) encontrado(s).`);
   return files;
 }
 
