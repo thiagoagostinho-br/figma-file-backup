@@ -90,9 +90,7 @@ async function discoverTeamFromFile(page, fileKey) {
   return match[1];
 }
 
-async function discoverFiles(page, teamId) {
-  await page.goto(`https://www.figma.com/files/team/${teamId}`, { waitUntil: "networkidle" });
-
+async function scrapeFileLinks(page) {
   const links = await page.$$eval(SELECTORS.fileLink, (anchors) =>
     anchors.map((a) => ({
       href: a.getAttribute("href") || "",
@@ -106,6 +104,38 @@ async function discoverFiles(page, teamId) {
     seen.add(link.href);
     return true;
   });
+}
+
+async function discoverFilesViaContributions(page, teamId) {
+  await page.goto(`https://www.figma.com/files/team/${teamId}`, { waitUntil: "networkidle" });
+
+  const teamName = await page.title().then((t) => t.split("–")[0]?.trim() || `Time ${teamId}`);
+
+  await page.getByText(TEXT_PATTERNS.membersEntry).first().click();
+
+  const selfEntry = page.getByText(TEXT_PATTERNS.selfMember).first();
+  if (!(await selfEntry.count())) {
+    throw new Error(
+      "Nao foi possivel identificar sua propria conta na lista de membros (selector desatualizado?)."
+    );
+  }
+  await selfEntry.click();
+
+  const contributionsTab = page.getByText(TEXT_PATTERNS.fileContributions).first();
+  if (!(await contributionsTab.count())) {
+    throw new Error("Aba 'File contributions' nao encontrada (selector desatualizado?).");
+  }
+  await contributionsTab.click();
+  await page.waitForLoadState("networkidle");
+
+  const files = await scrapeFileLinks(page);
+  return files.map((f) => ({ ...f, project: teamName }));
+}
+
+async function discoverDraftFiles(page) {
+  await page.goto("https://www.figma.com/files/recent", { waitUntil: "networkidle" });
+  const files = await scrapeFileLinks(page);
+  return files.map((f) => ({ ...f, project: "Drafts" }));
 }
 
 async function saveLocalCopy(page, fileUrl, outputPath) {
@@ -162,14 +192,45 @@ export async function runDiscovery({ fileKey }) {
       return;
     }
 
-    setState({ message: "Listando arquivos do time..." });
-    const files = await discoverFiles(activePage, teamId);
+    const errors = [];
+    let contributionFiles = [];
+    let draftFiles = [];
+
+    setState({ message: "Buscando seus arquivos no time (File Contributions)..." });
+    try {
+      contributionFiles = await discoverFilesViaContributions(activePage, teamId);
+    } catch (error) {
+      errors.push(
+        `Time ${teamId}: ${error instanceof Error ? error.message : "erro ao listar file contributions"}`
+      );
+    }
+
+    if (cancelRequested) {
+      setState({ phase: "cancelled", message: "Cancelado pelo usuario." });
+      await closeBrowser();
+      return;
+    }
+
+    setState({ message: "Buscando arquivos em Drafts..." });
+    try {
+      draftFiles = await discoverDraftFiles(activePage);
+    } catch (error) {
+      errors.push(`Drafts: ${error instanceof Error ? error.message : "erro ao listar drafts"}`);
+    }
+
+    const seen = new Set();
+    const files = [...contributionFiles, ...draftFiles].filter((f) => {
+      if (seen.has(f.href)) return false;
+      seen.add(f.href);
+      return true;
+    });
 
     setState({
       phase: "ready",
       message: `${files.length} arquivo(s) encontrado(s).`,
       files,
       teamId,
+      errors,
     });
   } catch (error) {
     setState({
@@ -188,8 +249,6 @@ export async function runDownload({ hrefs, outputDir }) {
 
   cancelRequested = false;
   const targetDir = outputDir || DEFAULT_OUTPUT_DIR;
-  const teamDir = path.join(targetDir, state.teamId);
-  fs.mkdirSync(teamDir, { recursive: true });
 
   const hrefSet = new Set(hrefs);
   const selected = state.files.filter((f) => hrefSet.has(f.href));
@@ -202,8 +261,11 @@ export async function runDownload({ hrefs, outputDir }) {
   for (const file of selected) {
     if (cancelRequested) break;
 
+    const safeProject = (file.project || "Outros").replace(/[^a-z0-9-_ ]+/gi, "_");
     const safeName = file.name.replace(/[^a-z0-9-_]+/gi, "_") || "arquivo";
-    const outputPath = path.join(teamDir, `${safeName}.fig`);
+    const projectDir = path.join(targetDir, safeProject);
+    fs.mkdirSync(projectDir, { recursive: true });
+    const outputPath = path.join(projectDir, `${safeName}.fig`);
 
     setState({ message: `Baixando ${file.name}...` });
 

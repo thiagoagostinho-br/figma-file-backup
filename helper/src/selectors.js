@@ -10,4 +10,7 @@ export const SELECTORS = {
 export const TEXT_PATTERNS = {
   fileMenu: /^file$/i,
   saveLocalCopy: /save local copy/i,
+  membersEntry: /members|membros/i,
+  selfMember: /\(you\)|\(voc[eê]\)/i,
+  fileContributions: /file contributions/i,
 };
