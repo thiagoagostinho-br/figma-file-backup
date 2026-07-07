@@ -1,6 +1,34 @@
+const detectedFileBox = document.getElementById("detectedFileBox");
+const manualUrlWrap = document.getElementById("manualUrlWrap");
 const fileUrlInput = document.getElementById("fileUrlInput");
 const findFilesBtn = document.getElementById("findFilesBtn");
 const discoveryStatus = document.getElementById("discoveryStatus");
+
+let detectedFileUrl = null;
+
+function extractFileInfo(url) {
+  const match = url.match(/figma\.com\/(?:file|design)\/([a-zA-Z0-9]+)(?:\/([^/?]+))?/);
+  if (!match) return null;
+  return {
+    url,
+    name: match[2] ? decodeURIComponent(match[2]).replace(/-/g, " ") : "arquivo do Figma",
+  };
+}
+
+chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
+  const info = tab && tab.url ? extractFileInfo(tab.url) : null;
+
+  if (info) {
+    detectedFileUrl = info.url;
+    detectedFileBox.style.display = "block";
+    detectedFileBox.innerHTML = `Arquivo detectado na aba atual: <strong>${info.name}</strong>`;
+    manualUrlWrap.style.display = "none";
+  } else {
+    manualUrlWrap.style.display = "block";
+    discoveryStatus.textContent =
+      "Nao detectei um arquivo Figma na aba ativa. Abra o arquivo ou cole o link abaixo.";
+  }
+});
 
 const fileListWrap = document.getElementById("fileListWrap");
 const fileListEl = document.getElementById("fileList");
@@ -93,7 +121,7 @@ function renderState(state) {
 }
 
 findFilesBtn.onclick = () => {
-  const url = fileUrlInput.value.trim();
+  const url = detectedFileUrl || fileUrlInput.value.trim();
   if (!isValidFigmaFileUrl(url)) {
     discoveryStatus.className = "status error";
     discoveryStatus.textContent = "Link invalido. Copie o link do arquivo pelo Figma (Copy link).";

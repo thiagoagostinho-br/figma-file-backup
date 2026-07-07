@@ -3,7 +3,7 @@
   "name": "Figma File Backup",
   "version": "0.1.0",
   "description": "Baixa os arquivos .fig do seu time diretamente do navegador, sem automacao externa.",
-  "permissions": ["downloads", "scripting"],
+  "permissions": ["downloads", "scripting", "activeTab"],
   "host_permissions": ["https://www.figma.com/*"],
   "background": {
     "service_worker": "background.js"

@@ -92,9 +92,14 @@
     <h2>Figma File Backup</h2>
 
     <div id="setup">
-      <label class="fieldLabel" for="fileUrlInput">Link do arquivo atual</label>
-      <input id="fileUrlInput" type="text" placeholder="Cole aqui: https://figma.com/design/..." />
-      <div class="hint">No Figma: menu do arquivo &rarr; Copy link (ou Cmd/Ctrl+L).</div>
+      <div id="detectedFileBox" class="hint" style="display: none"></div>
+
+      <div id="manualUrlWrap" style="display: none">
+        <label class="fieldLabel" for="fileUrlInput">Link do arquivo atual</label>
+        <input id="fileUrlInput" type="text" placeholder="Cole aqui: https://figma.com/design/..." />
+        <div class="hint">No Figma: menu do arquivo &rarr; Copy link (ou Cmd/Ctrl+L).</div>
+      </div>
+
       <button id="findFilesBtn">Buscar arquivos</button>
       <div id="discoveryStatus" class="status"></div>
     </div>
